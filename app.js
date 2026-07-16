@@ -5,6 +5,7 @@ const { sql, db } = require('@vercel/postgres');
 
 const app = express();
 const ALLOWED_STATUSES = new Set(['WFO', 'WFH', 'Leave', 'Holiday']);
+const PG_UNIQUE_VIOLATION = '23505';
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'calendar.json');
 const hasDatabase = Boolean(process.env.POSTGRES_URL || process.env.DATABASE_URL);
@@ -158,7 +159,7 @@ async function addMember(name) {
   try {
     await sql`INSERT INTO members (name) VALUES (${trimmed})`;
   } catch (error) {
-    if (error.code === '23505') {
+    if (error.code === PG_UNIQUE_VIOLATION) {
       const err = new Error('Member already exists');
       err.status = 409;
       throw err;

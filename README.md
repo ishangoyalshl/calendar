@@ -30,20 +30,37 @@ A lightweight, self-hosted web app to track your team's Work-From-Home (WFH), pl
 
 ## Setup
 
-### Prerequisites
+### Option A — Self-hosted (Node.js server, shared data)
 
-- [Node.js](https://nodejs.org/) v14 or later
-
-### Run
+Runs with a backend server. All team members see the same data stored in `data/calendar.json`.
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/ishangoyalshl/calendar.git
 cd calendar
 npm install
 npm start
 ```
 
-Visit **http://localhost:3000** in your browser.
+Visit **http://localhost:3000**
+
+---
+
+### Option B — GitHub Pages (static, per-browser data)
+
+The app is automatically deployed to GitHub Pages on every push to `main` via GitHub Actions.
+
+**One-time setup** (only needed once, by a repo admin):
+
+1. Go to your repo → **Settings → Pages**
+2. Under **Source**, select **GitHub Actions**
+3. Click **Save**
+
+After your next push to `main`, the workflow will deploy the app to:
+```
+https://<your-username>.github.io/calendar/
+```
+
+> **Note:** On GitHub Pages there is no backend server, so data is stored in your browser's `localStorage`. Each browser/device has its own copy — ideal for personal use or quick demos. For shared team data, use the Node.js self-hosted option.
 
 ---
 

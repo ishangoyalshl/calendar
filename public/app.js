@@ -1,9 +1,14 @@
 /* ============================================================
    app.js — Team WFH/Leave Tracker frontend logic
+   Works with the Express backend (Node.js) when available,
+   and falls back to localStorage for GitHub Pages / offline use.
    ============================================================ */
 
 const STATUSES = ['WFO', 'WFH', 'Leave', 'Holiday', ''];
 const STATUS_LABELS = { WFO: 'WFO', WFH: 'WFH', Leave: 'LV', Holiday: 'HOL', '': '' };
+const LS_KEY = 'team-wfh-calendar';
+
+let USE_LOCAL_STORAGE = false; // flipped to true when API is unreachable
 
 let state = {
   year: new Date().getFullYear(),
@@ -11,6 +16,21 @@ let state = {
   members: [],
   entries: {}  // { "YYYY-MM": { "MemberName": { "day": "STATUS" } } }
 };
+
+// ─── localStorage helpers ─────────────────────────────────────
+
+function lsRead() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    return raw ? JSON.parse(raw) : { members: [], entries: {} };
+  } catch {
+    return { members: [], entries: {} };
+  }
+}
+
+function lsWrite(data) {
+  localStorage.setItem(LS_KEY, JSON.stringify(data));
+}
 
 // ─── API helpers ─────────────────────────────────────────────
 
@@ -26,18 +46,57 @@ async function apiFetch(url, options = {}) {
   return res.json();
 }
 
+// ─── Offline / GitHub Pages banner ───────────────────────────
+
+function showOfflineBanner() {
+  const existing = document.getElementById('offline-banner');
+  if (existing) return;
+  const banner = document.createElement('div');
+  banner.id = 'offline-banner';
+  banner.style.cssText = [
+    'background:#2196F3', 'color:#fff', 'text-align:center',
+    'padding:8px 16px', 'font-size:0.85rem', 'font-weight:500',
+    'letter-spacing:0.2px'
+  ].join(';');
+  banner.textContent = '🌐 Running in offline mode — data is saved in your browser (localStorage). Run the Node.js server for shared/persistent storage.';
+  document.body.insertBefore(banner, document.body.firstChild);
+}
+
 // ─── Data loading ─────────────────────────────────────────────
 
 async function loadData() {
-  const data = await apiFetch('/api/data');
-  state.members = data.members || [];
-  state.entries = data.entries || {};
-  renderCalendar();
+  if (USE_LOCAL_STORAGE) {
+    const data = lsRead();
+    state.members = data.members || [];
+    state.entries = data.entries || {};
+    renderCalendar();
+    return;
+  }
+  try {
+    const data = await apiFetch('/api/data');
+    state.members = data.members || [];
+    state.entries = data.entries || {};
+    renderCalendar();
+  } catch {
+    // Backend unreachable — switch to localStorage (GitHub Pages / offline)
+    USE_LOCAL_STORAGE = true;
+    showOfflineBanner();
+    const data = lsRead();
+    state.members = data.members || [];
+    state.entries = data.entries || {};
+    renderCalendar();
+  }
 }
 
 // ─── Save ─────────────────────────────────────────────────────
 
 async function saveEntries() {
+  if (USE_LOCAL_STORAGE) {
+    const data = lsRead();
+    data.entries = state.entries;
+    lsWrite(data);
+    return;
+  }
   await apiFetch('/api/data', {
     method: 'POST',
     body: JSON.stringify({ entries: state.entries })
@@ -201,6 +260,21 @@ async function handleAddMember() {
   const name = input.value.trim();
   if (!name) { input.focus(); return; }
 
+  if (USE_LOCAL_STORAGE) {
+    const data = lsRead();
+    if (data.members.includes(name)) {
+      showToast('Member already exists', true);
+      return;
+    }
+    data.members.push(name);
+    lsWrite(data);
+    state.members = data.members;
+    input.value = '';
+    renderCalendar();
+    showToast(`Added "${name}"`);
+    return;
+  }
+
   try {
     const result = await apiFetch('/api/members', {
       method: 'POST',
@@ -221,6 +295,23 @@ async function handleDeleteMember(e) {
   e.stopPropagation();
   const name = e.currentTarget.dataset.member;
   if (!confirm(`Remove "${name}" from the calendar? Their data will be deleted.`)) return;
+
+  if (USE_LOCAL_STORAGE) {
+    const data = lsRead();
+    const idx = data.members.indexOf(name);
+    if (idx !== -1) data.members.splice(idx, 1);
+    for (const mKey of Object.keys(data.entries)) {
+      delete data.entries[mKey][name];
+    }
+    lsWrite(data);
+    state.members = data.members;
+    for (const mKey of Object.keys(state.entries)) {
+      delete state.entries[mKey][name];
+    }
+    renderCalendar();
+    showToast(`Removed "${name}"`);
+    return;
+  }
 
   try {
     const result = await apiFetch(`/api/members/${encodeURIComponent(name)}`, { method: 'DELETE' });

@@ -182,7 +182,7 @@ async function removeMember(name) {
 
     data.members.splice(idx, 1);
     for (const month of Object.keys(data.entries)) {
-      if (data.entries[month][name]) delete data.entries[month][name];
+      delete data.entries[month][name];
     }
     writeFileData(data);
     return data.members;

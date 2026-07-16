@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Team WFH/Leave Tracker</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-wrapper">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <h1 class="app-title">Team Calendar</h1>
+      </div>
+      <div class="header-nav">
+        <button class="btn btn-icon" id="btn-prev" title="Previous month">&#8249;</button>
+        <span class="month-label" id="month-label">July 2026</span>
+        <button class="btn btn-icon" id="btn-next" title="Next month">&#8250;</button>
+      </div>
+      <div class="header-right">
+        <button class="btn btn-secondary" id="btn-today">Today</button>
+      </div>
+    </header>
+
+    <!-- Legend -->
+    <div class="legend">
+      <span class="legend-item"><span class="legend-dot wfo"></span>WFO</span>
+      <span class="legend-item"><span class="legend-dot wfh"></span>WFH</span>
+      <span class="legend-item"><span class="legend-dot leave"></span>Leave</span>
+      <span class="legend-item"><span class="legend-dot holiday"></span>Holiday</span>
+      <span class="legend-item"><span class="legend-dot empty"></span>Not set</span>
+    </div>
+
+    <!-- Add member form -->
+    <div class="add-member-bar">
+      <input type="text" id="new-member-input" class="member-input" placeholder="New team member name…" maxlength="60" />
+      <button class="btn btn-primary" id="btn-add-member">+ Add Member</button>
+    </div>
+
+    <!-- Calendar container -->
+    <div class="calendar-scroll">
+      <table class="calendar-table" id="calendar-table">
+        <thead id="calendar-thead"></thead>
+        <tbody id="calendar-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Toast notification -->
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

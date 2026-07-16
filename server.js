@@ -6,11 +6,20 @@ const app = express();
 const PORT = 3000;
 const DATA_FILE = path.join(__dirname, 'data', 'calendar.json');
 
+// Ensure data directory exists
+const DATA_DIR = path.join(__dirname, 'data');
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Helper: read data file
+// Helper: read data file (returns default structure if file is missing)
 function readData() {
+  if (!fs.existsSync(DATA_FILE)) {
+    return { members: [], entries: {} };
+  }
   const raw = fs.readFileSync(DATA_FILE, 'utf8');
   return JSON.parse(raw);
 }

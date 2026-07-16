@@ -13,7 +13,7 @@ A lightweight, self-hosted web app to track your team's Work-From-Home (WFH), pl
 - ⬅️➡️ **Month navigation** with Today shortcut
 - 📊 **Per-person monthly summary** (WFO / WFH / Leave / Holiday counts)
 - 🗓️ **Weekends** visually dimmed; **today's column** highlighted
-- 💾 **Auto-save** to JSON on every cell change
+- 💾 **Auto-save** on every cell change via backend API
 - Zero frontend dependencies — plain HTML + CSS + Vanilla JS
 
 ---
@@ -24,7 +24,7 @@ A lightweight, self-hosted web app to track your team's Work-From-Home (WFH), pl
 |----------|-------------------------------------|
 | Frontend | HTML + CSS + Vanilla JS             |
 | Backend  | Node.js + Express                   |
-| Storage  | JSON file (`data/calendar.json`)    |
+| Storage  | Postgres (Vercel) with local JSON fallback |
 
 ---
 
@@ -32,7 +32,7 @@ A lightweight, self-hosted web app to track your team's Work-From-Home (WFH), pl
 
 ### Option A — Self-hosted (Node.js server, shared data)
 
-Runs with a backend server. All team members see the same data stored in `data/calendar.json`.
+Runs with a backend server. Data is shared through the API (Postgres when configured, otherwise local `data/calendar.json`).
 
 ```bash
 git clone https://github.com/ishangoyalshl/calendar.git
@@ -42,6 +42,8 @@ npm start
 ```
 
 Visit **http://localhost:3000**
+
+> Optional: set `POSTGRES_URL` to run locally with Postgres instead of JSON file storage.
 
 ---
 
@@ -64,14 +66,30 @@ https://<your-username>.github.io/calendar/
 
 ---
 
+### Option C — Vercel (frontend + API + persistent DB)
+
+1. Import this repo in Vercel.
+2. Add a managed Postgres database (or connect an external Postgres DB).
+3. Set `POSTGRES_URL` in **Project Settings → Environment Variables**.
+4. Keep `main` as the production branch.
+5. Deploy.
+
+The app uses serverless API routes on Vercel and keeps the same frontend/API contract.
+
+---
+
 ## File Structure
 
 ```
 /
 ├── server.js              # Express server + REST API
+├── app.js                 # Shared Express app (used by local + Vercel)
+├── vercel.json            # API rewrite config for Vercel
+├── api/
+│   └── index.js           # Vercel serverless API entrypoint
 ├── package.json
 ├── data/
-│   └── calendar.json      # Persistent JSON storage
+│   └── calendar.json      # Local fallback storage
 └── public/
     ├── index.html         # Main app page
     ├── style.css          # Styles
@@ -89,6 +107,7 @@ https://<your-username>.github.io/calendar/
 | GET      | `/api/members`          | Return list of team members        |
 | POST     | `/api/members`          | Add a new team member              |
 | DELETE   | `/api/members/:name`    | Remove a team member               |
+| GET      | `/api/health`           | Health + active storage mode       |
 
 ---
 
@@ -118,32 +137,25 @@ https://<your-username>.github.io/calendar/
 
 ---
 
-## Migrating to SQLite
+## Database Schema (auto-created)
 
-The JSON structure maps cleanly to two SQL tables:
+When `POSTGRES_URL` is configured, the app creates these tables automatically:
 
 ```sql
 CREATE TABLE members (
-  id   INTEGER PRIMARY KEY AUTOINCREMENT,
+  id   SERIAL PRIMARY KEY,
   name TEXT    NOT NULL UNIQUE
 );
 
 CREATE TABLE entries (
-  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  id        SERIAL PRIMARY KEY,
   month     TEXT    NOT NULL,  -- "YYYY-MM"
-  member    TEXT    NOT NULL,  -- member name (or FK to members.id)
+  member    TEXT    NOT NULL,  -- member name
   day       INTEGER NOT NULL,  -- 1–31
   status    TEXT    NOT NULL,  -- "WFO" | "WFH" | "Leave" | "Holiday"
   UNIQUE(month, member, day)
 );
 ```
-
-**Migration steps:**
-
-1. Add `better-sqlite3` (or `sqlite3`) to `package.json`
-2. Replace `readData()` / `writeData()` in `server.js` with SQL queries
-3. Run a one-time migration script to import `calendar.json` into the DB
-4. No frontend changes required — the API contract stays the same
 
 ---
 

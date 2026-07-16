@@ -1,7 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { sql } = require('@vercel/postgres');
+const { sql, db } = require('@vercel/postgres');
 
 const app = express();
 const ALLOWED_STATUSES = new Set(['WFO', 'WFH', 'Leave', 'Holiday']);
@@ -102,25 +102,40 @@ async function saveEntries(entries) {
   }
 
   await ensureDbReady();
-  await sql`BEGIN`;
+  const client = await db.connect();
   try {
-    await sql`DELETE FROM entries`;
+    await client.sql`BEGIN`;
+    await client.sql`DELETE FROM entries`;
 
+    const rows = [];
     for (const [month, monthEntries] of Object.entries(entries)) {
       for (const [member, memberEntries] of Object.entries(monthEntries)) {
         for (const [day, status] of Object.entries(memberEntries)) {
-          await sql`
-            INSERT INTO entries (month, member, day, status)
-            VALUES (${month}, ${member}, ${Number(day)}, ${status})
-          `;
+          rows.push([month, member, Number(day), status]);
         }
       }
     }
 
-    await sql`COMMIT`;
+    if (rows.length > 0) {
+      const values = [];
+      const placeholders = rows.map((row, index) => {
+        const base = index * 4;
+        values.push(...row);
+        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`;
+      });
+
+      await client.query(
+        `INSERT INTO entries (month, member, day, status) VALUES ${placeholders.join(', ')}`,
+        values
+      );
+    }
+
+    await client.sql`COMMIT`;
   } catch (error) {
-    await sql`ROLLBACK`;
+    await client.sql`ROLLBACK`;
     throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -181,14 +196,17 @@ async function removeMember(name) {
     throw err;
   }
 
-  await sql`BEGIN`;
+  const client = await db.connect();
   try {
-    await sql`DELETE FROM members WHERE name = ${name}`;
-    await sql`DELETE FROM entries WHERE member = ${name}`;
-    await sql`COMMIT`;
+    await client.sql`BEGIN`;
+    await client.sql`DELETE FROM entries WHERE member = ${name}`;
+    await client.sql`DELETE FROM members WHERE name = ${name}`;
+    await client.sql`COMMIT`;
   } catch (error) {
-    await sql`ROLLBACK`;
+    await client.sql`ROLLBACK`;
     throw error;
+  } finally {
+    client.release();
   }
 
   const result = await sql`SELECT name FROM members ORDER BY id ASC`;

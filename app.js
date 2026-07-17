@@ -1,53 +1,35 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { Pool } = require('pg');
+const { createClient } = require('@supabase/supabase-js');
+
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const app = express();
 const ALLOWED_STATUSES = new Set(['WFO', 'WFH', 'Leave', 'Holiday']);
-const PG_UNIQUE_VIOLATION = '23505';
+const DB_UNIQUE_VIOLATION = '23505';
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'calendar.json');
-const rawConnectionString = process.env.SUPABASE_DB_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL;
-const disableSslEnv = process.env.PGSSLMODE === 'disable' || process.env.PGSSL === 'false';
 
-function getSslMode(connectionString) {
-  if (!connectionString) return '';
-  try {
-    const url = new URL(connectionString);
-    return (url.searchParams.get('sslmode') || '').toLowerCase();
-  } catch {
-    return '';
-  }
-}
+const supabaseUrl = process.env.POSTGRES_THOR_SUPABASE_URL;
+const supabaseKey = process.env.POSTGRES_SUPABASE_ANON_KEY;
 
-function normalizeConnectionString(connectionString) {
-  if (!connectionString) return connectionString;
-  try {
-    const url = new URL(connectionString);
-    // node-postgres can let URL SSL params override config.ssl; strip them so our ssl config is authoritative.
-    url.searchParams.delete('sslmode');
-    url.searchParams.delete('ssl');
-    return url.toString();
-  } catch {
-    return connectionString;
-  }
-}
+const hasDatabaseConfig = Boolean(supabaseUrl && supabaseKey);
+const supabase = hasDatabaseConfig
+  ? createClient(supabaseUrl, supabaseKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false
+    }
+  })
+  : null;
 
-const connectionString = normalizeConnectionString(rawConnectionString);
-const sslMode = getSslMode(rawConnectionString);
-const hasDatabase = Boolean(connectionString);
-
-const strictSslVerification = sslMode === 'verify-ca' || sslMode === 'verify-full';
-const disableSsl = disableSslEnv || sslMode === 'disable';
-
-let pool;
-if (hasDatabase) {
-  pool = new Pool({
-    connectionString,
-    ssl: disableSsl ? false : { rejectUnauthorized: strictSslVerification }
-  });
-}
+const storageState = {
+  mode: 'file',
+  initialized: false,
+  initPromise: null
+};
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -56,26 +38,47 @@ if (!fs.existsSync(DATA_DIR)) {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-let dbInitPromise;
 function ensureDbReady() {
-  if (!hasDatabase) return Promise.resolve();
-  if (!dbInitPromise) {
-    dbInitPromise = (async () => {
-      await pool.query(`CREATE TABLE IF NOT EXISTS members (
-        id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE
-      )`);
-      await pool.query(`CREATE TABLE IF NOT EXISTS entries (
-        id SERIAL PRIMARY KEY,
-        month TEXT NOT NULL,
-        member TEXT NOT NULL,
-        day INTEGER NOT NULL,
-        status TEXT NOT NULL,
-        UNIQUE(month, member, day)
-      )`);
-    })();
+  if (storageState.initialized) {
+    return Promise.resolve(storageState.mode === 'database');
   }
-  return dbInitPromise;
+
+  if (!hasDatabaseConfig || !supabase) {
+    storageState.initialized = true;
+    storageState.mode = 'file';
+    return Promise.resolve(false);
+  }
+
+  if (!storageState.initPromise) {
+    storageState.initPromise = (async () => {
+      const membersCheck = await supabase
+        .from('members')
+        .select('id', { head: true, count: 'exact' })
+        .limit(1);
+      if (membersCheck.error) {
+        throw new Error(`members table check failed: ${membersCheck.error.message}`);
+      }
+
+      const entriesCheck = await supabase
+        .from('entries')
+        .select('id', { head: true, count: 'exact' })
+        .limit(1);
+      if (entriesCheck.error) {
+        throw new Error(`entries table check failed: ${entriesCheck.error.message}`);
+      }
+
+      storageState.mode = 'database';
+      storageState.initialized = true;
+      return true;
+    })().catch((error) => {
+      console.warn('Database not reachable, falling back to file storage:', error.message);
+      storageState.mode = 'file';
+      storageState.initialized = true;
+      return false;
+    });
+  }
+
+  return storageState.initPromise;
 }
 
 function readFileData() {
@@ -90,25 +93,36 @@ function writeFileData(data) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
 }
 
-async function readData() {
-  if (!hasDatabase) return readFileData();
-
-  await ensureDbReady();
+async function readDataFromDatabase() {
   const [membersResult, entriesResult] = await Promise.all([
-    pool.query('SELECT name FROM members ORDER BY id ASC'),
-    pool.query('SELECT month, member, day, status FROM entries ORDER BY month, member, day')
+    supabase.from('members').select('name').order('id', { ascending: true }),
+    supabase
+      .from('entries')
+      .select('month, member, day, status')
+      .order('month', { ascending: true })
+      .order('member', { ascending: true })
+      .order('day', { ascending: true })
   ]);
 
-  const members = membersResult.rows.map((row) => row.name);
+  if (membersResult.error) throw membersResult.error;
+  if (entriesResult.error) throw entriesResult.error;
+
+  const members = membersResult.data.map((row) => row.name);
   const entries = {};
 
-  for (const row of entriesResult.rows) {
+  for (const row of entriesResult.data) {
     if (!entries[row.month]) entries[row.month] = {};
     if (!entries[row.month][row.member]) entries[row.month][row.member] = {};
     entries[row.month][row.member][String(row.day)] = row.status;
   }
 
   return { members, entries };
+}
+
+async function readData() {
+  const useDatabase = await ensureDbReady();
+  if (!useDatabase) return readFileData();
+  return readDataFromDatabase();
 }
 
 function isValidEntries(entries) {
@@ -134,55 +148,41 @@ function isValidEntries(entries) {
 }
 
 async function saveEntries(entries) {
-  if (!hasDatabase) {
+  const useDatabase = await ensureDbReady();
+  if (!useDatabase) {
     const current = readFileData();
     current.entries = entries;
     writeFileData(current);
     return;
   }
 
-  await ensureDbReady();
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query('DELETE FROM entries');
+  const deleteResult = await supabase.from('entries').delete().not('id', 'is', null);
+  if (deleteResult.error) {
+    throw deleteResult.error;
+  }
 
-    const rows = [];
-    for (const [month, monthEntries] of Object.entries(entries)) {
-      for (const [member, memberEntries] of Object.entries(monthEntries)) {
-        for (const [day, status] of Object.entries(memberEntries)) {
-          rows.push([month, member, Number(day), status]);
-        }
+  const rows = [];
+  for (const [month, monthEntries] of Object.entries(entries)) {
+    for (const [member, memberEntries] of Object.entries(monthEntries)) {
+      for (const [day, status] of Object.entries(memberEntries)) {
+        rows.push({ month, member, day: Number(day), status });
       }
     }
+  }
 
-    if (rows.length > 0) {
-      const values = [];
-      const placeholders = rows.map((row, index) => {
-        const base = index * 4;
-        values.push(...row);
-        return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`;
-      });
-
-      await client.query(
-        `INSERT INTO entries (month, member, day, status) VALUES ${placeholders.join(', ')}`,
-        values
-      );
+  if (rows.length > 0) {
+    const insertResult = await supabase.from('entries').insert(rows);
+    if (insertResult.error) {
+      throw insertResult.error;
     }
-
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
   }
 }
 
 async function addMember(name) {
   const trimmed = name.trim();
 
-  if (!hasDatabase) {
+  const useDatabase = await ensureDbReady();
+  if (!useDatabase) {
     const data = readFileData();
     if (data.members.includes(trimmed)) {
       const err = new Error('Member already exists');
@@ -194,24 +194,24 @@ async function addMember(name) {
     return data.members;
   }
 
-  await ensureDbReady();
-  try {
-    await pool.query('INSERT INTO members (name) VALUES ($1)', [trimmed]);
-  } catch (error) {
-    if (error.code === PG_UNIQUE_VIOLATION) {
+  const insertResult = await supabase.from('members').insert({ name: trimmed });
+  if (insertResult.error) {
+    if (insertResult.error.code === DB_UNIQUE_VIOLATION) {
       const err = new Error('Member already exists');
       err.status = 409;
       throw err;
     }
-    throw error;
+    throw insertResult.error;
   }
 
-  const result = await pool.query('SELECT name FROM members ORDER BY id ASC');
-  return result.rows.map((row) => row.name);
+  const result = await supabase.from('members').select('name').order('id', { ascending: true });
+  if (result.error) throw result.error;
+  return result.data.map((row) => row.name);
 }
 
 async function removeMember(name) {
-  if (!hasDatabase) {
+  const useDatabase = await ensureDbReady();
+  if (!useDatabase) {
     const data = readFileData();
     const idx = data.members.indexOf(name);
     if (idx === -1) {
@@ -228,33 +228,34 @@ async function removeMember(name) {
     return data.members;
   }
 
-  await ensureDbReady();
-  const existing = await pool.query('SELECT id FROM members WHERE name = $1', [name]);
-  if (existing.rowCount === 0) {
+  const existing = await supabase.from('members').select('id').eq('name', name).maybeSingle();
+  if (existing.error && existing.error.code !== 'PGRST116') {
+    throw existing.error;
+  }
+  if (!existing.data) {
     const err = new Error('Member not found');
     err.status = 404;
     throw err;
   }
 
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    await client.query('DELETE FROM entries WHERE member = $1', [name]);
-    await client.query('DELETE FROM members WHERE name = $1', [name]);
-    await client.query('COMMIT');
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  const deleteEntries = await supabase.from('entries').delete().eq('member', name);
+  if (deleteEntries.error) throw deleteEntries.error;
 
-  const result = await pool.query('SELECT name FROM members ORDER BY id ASC');
-  return result.rows.map((row) => row.name);
+  const deleteMember = await supabase.from('members').delete().eq('name', name);
+  if (deleteMember.error) throw deleteMember.error;
+
+  const result = await supabase.from('members').select('name').order('id', { ascending: true });
+  if (result.error) throw result.error;
+  return result.data.map((row) => row.name);
 }
 
-app.get('/api/health', (req, res) => {
-  res.json({ ok: true, storage: hasDatabase ? 'database' : 'file' });
+app.get('/api/health', async (req, res) => {
+  const useDatabase = await ensureDbReady();
+  res.json({
+    ok: true,
+    storage: useDatabase ? 'database' : 'file',
+    databaseConfigured: hasDatabaseConfig
+  });
 });
 
 app.get('/api/data', async (req, res) => {

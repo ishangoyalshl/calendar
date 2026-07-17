@@ -136,6 +136,63 @@ const MONTH_NAMES = [
 
 const DAY_ABBR = ['Su','Mo','Tu','We','Th','Fr','Sa'];
 
+function getMemberSummary(member, key) {
+  const memberEntries = (state.entries[key] && state.entries[key][member]) ? state.entries[key][member] : {};
+  const summary = { WFO: 0, WFH: 0, Leave: 0, Holiday: 0 };
+
+  for (const status of Object.values(memberEntries)) {
+    if (summary[status] !== undefined) summary[status] += 1;
+  }
+
+  return summary;
+}
+
+function renderSummaryModal() {
+  const key = monthKey();
+  const content = document.getElementById('summary-modal-content');
+  const title = document.getElementById('summary-title');
+  title.textContent = `Monthly Summary - ${MONTH_NAMES[state.month - 1]} ${state.year}`;
+
+  if (state.members.length === 0) {
+    content.innerHTML = '<div class="summary-empty">No team members to summarize.</div>';
+    return;
+  }
+
+  let html = '';
+  html += '<table class="summary-table">';
+  html += '<thead><tr><th>Member</th><th>WFO</th><th>WFH</th><th>Leave</th><th>Holiday</th><th>Total Marked</th></tr></thead>';
+  html += '<tbody>';
+
+  for (const member of state.members) {
+    const summary = getMemberSummary(member, key);
+    const total = summary.WFO + summary.WFH + summary.Leave + summary.Holiday;
+    html += `<tr>
+      <td>${escapeHtml(member)}</td>
+      <td>${summary.WFO}</td>
+      <td>${summary.WFH}</td>
+      <td>${summary.Leave}</td>
+      <td>${summary.Holiday}</td>
+      <td>${total}</td>
+    </tr>`;
+  }
+
+  html += '</tbody></table>';
+  content.innerHTML = html;
+}
+
+function openSummaryModal() {
+  renderSummaryModal();
+  const backdrop = document.getElementById('summary-modal-backdrop');
+  backdrop.classList.add('open');
+  backdrop.setAttribute('aria-hidden', 'false');
+}
+
+function closeSummaryModal() {
+  const backdrop = document.getElementById('summary-modal-backdrop');
+  backdrop.classList.remove('open');
+  backdrop.setAttribute('aria-hidden', 'true');
+}
+
 function renderCalendar() {
   const { year, month, members, entries } = state;
   const key = monthKey();
@@ -154,7 +211,6 @@ function renderCalendar() {
     const todayClass = isToday(year, month, d) ? ' today-col' : '';
     headerRow += `<th class="${weekend}${todayClass}" title="${MONTH_NAMES[month-1]} ${d}, ${year}">${d}<br><span style="font-weight:400;font-size:0.7em">${DAY_ABBR[dow]}</span></th>`;
   }
-  headerRow += '<th class="th-summary">Summary</th>';
   headerRow += '</tr>';
   thead.innerHTML = headerRow;
 
@@ -163,11 +219,10 @@ function renderCalendar() {
   let rows = '';
 
   if (members.length === 0) {
-    rows = `<tr><td colspan="${totalDays + 2}" style="text-align:center;padding:32px;color:#a0aec0;font-size:0.95rem;">No team members yet. Add one above.</td></tr>`;
+    rows = `<tr><td colspan="${totalDays + 1}" style="text-align:center;padding:32px;color:#a0aec0;font-size:0.95rem;">No team members yet. Add one above.</td></tr>`;
   } else {
     for (const member of members) {
       const memberEntries = (entries[key] && entries[key][member]) ? entries[key][member] : {};
-      let wfoCount = 0, wfhCount = 0, leaveCount = 0, holidayCount = 0;
 
       rows += `<tr>`;
       // Member name cell
@@ -186,23 +241,8 @@ function renderCalendar() {
         const statusClass = status ? `status-${status.toLowerCase()}` : 'status-empty';
         const label = STATUS_LABELS[status] || '';
 
-        if (status === 'WFO') wfoCount++;
-        else if (status === 'WFH') wfhCount++;
-        else if (status === 'Leave') leaveCount++;
-        else if (status === 'Holiday') holidayCount++;
-
         rows += `<td class="td-day ${statusClass}${weekend}${todayClass}" data-member="${escapeAttr(member)}" data-day="${d}" title="${escapeAttr(member)} — ${MONTH_NAMES[month-1]} ${d}: ${status || 'Not set'}">${label}</td>`;
       }
-
-      // Summary cell
-      const badges = [];
-      if (wfoCount)     badges.push(`<span class="badge badge-wfo">${wfoCount} WFO</span>`);
-      if (wfhCount)     badges.push(`<span class="badge badge-wfh">${wfhCount} WFH</span>`);
-      if (leaveCount)   badges.push(`<span class="badge badge-leave">${leaveCount} LV</span>`);
-      if (holidayCount) badges.push(`<span class="badge badge-holiday">${holidayCount} HOL</span>`);
-      const summaryHtml = badges.length ? `<div class="summary-badges">${badges.join('')}</div>` : '<span style="color:#a0aec0">—</span>';
-
-      rows += `<td class="td-summary">${summaryHtml}</td>`;
       rows += `</tr>`;
     }
   }
@@ -378,6 +418,14 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-prev').addEventListener('click', () => navigateMonth(-1));
   document.getElementById('btn-next').addEventListener('click', () => navigateMonth(1));
   document.getElementById('btn-today').addEventListener('click', goToToday);
+  document.getElementById('btn-summary').addEventListener('click', openSummaryModal);
+  document.getElementById('btn-summary-close').addEventListener('click', closeSummaryModal);
+  document.getElementById('summary-modal-backdrop').addEventListener('click', (e) => {
+    if (e.target.id === 'summary-modal-backdrop') closeSummaryModal();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeSummaryModal();
+  });
 
   // Add member
   document.getElementById('btn-add-member').addEventListener('click', handleAddMember);

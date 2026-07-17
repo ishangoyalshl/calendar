@@ -24,7 +24,7 @@ A lightweight, self-hosted web app to track your team's Work-From-Home (WFH), pl
 |----------|-------------------------------------|
 | Frontend | HTML + CSS + Vanilla JS             |
 | Backend  | Node.js + Express                   |
-| Storage  | Supabase Postgres (via `pg`) with local JSON fallback |
+| Storage  | Supabase (via `@supabase/supabase-js`) with local JSON fallback |
 
 ---
 
@@ -43,7 +43,7 @@ npm start
 
 Visit **http://localhost:3000**
 
-> Optional: set `SUPABASE_DB_URL` (or `POSTGRES_URL`/`DATABASE_URL`) to run locally with Postgres instead of JSON file storage.
+> Optional: set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (or `SUPABASE_ANON_KEY`) to run with Supabase instead of JSON file storage.
 
 ---
 
@@ -69,12 +69,12 @@ https://<your-username>.github.io/calendar/
 ### Option C — Vercel + Supabase (frontend + API + persistent DB)
 
 1. Import this repo in Vercel.
-2. Create a Supabase project and copy the Postgres connection string.
-3. In Vercel, set one of these environment variables in **Project Settings → Environment Variables**:
-  - `SUPABASE_DB_URL` (preferred)
-  - `POSTGRES_URL`
-  - `DATABASE_URL`
-4. Use the Supabase transaction pooler connection string and keep SSL enabled.
+2. Create a Supabase project and copy the project URL and API key.
+3. In Vercel, set these environment variables in **Project Settings → Environment Variables**:
+  - `SUPABASE_URL`
+  - `SUPABASE_SERVICE_ROLE_KEY` (recommended for server-side API usage)
+  - or `SUPABASE_ANON_KEY` (if you intentionally want restricted/RLS-bound access)
+4. Ensure your Supabase table policies allow the API operations you use.
 5. Keep `main` as the production branch.
 6. Deploy.
 
@@ -143,7 +143,7 @@ The app uses serverless API routes on Vercel and keeps the same frontend/API con
 
 ## Database Schema (auto-created)
 
-When `SUPABASE_DB_URL` (or `POSTGRES_URL` / `DATABASE_URL`) is configured, the app creates these tables automatically:
+When `SUPABASE_URL` with a key is configured, the app reads/writes these tables (create them in Supabase SQL editor if they do not exist):
 
 ```sql
 CREATE TABLE members (

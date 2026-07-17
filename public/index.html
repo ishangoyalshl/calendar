@@ -34,8 +34,13 @@
 
     <!-- Add member form -->
     <div class="add-member-bar">
-      <input type="text" id="new-member-input" class="member-input" placeholder="New team member name…" maxlength="60" />
-      <button class="btn btn-primary" id="btn-add-member">+ Add Member</button>
+      <div class="add-member-left">
+        <input type="text" id="new-member-input" class="member-input" placeholder="New team member name..." maxlength="60" />
+        <button class="btn btn-primary" id="btn-add-member">+ Add Member</button>
+      </div>
+      <div class="add-member-right">
+        <button class="btn btn-secondary" id="btn-summary">Summary</button>
+      </div>
     </div>
 
     <!-- Calendar container -->
@@ -48,6 +53,17 @@
 
     <!-- Toast notification -->
     <div class="toast" id="toast"></div>
+
+    <!-- Summary modal -->
+    <div class="modal-backdrop" id="summary-modal-backdrop" aria-hidden="true">
+      <div class="summary-modal" id="summary-modal" role="dialog" aria-modal="true" aria-labelledby="summary-title">
+        <div class="summary-modal-header">
+          <h2 id="summary-title">Monthly Summary</h2>
+          <button class="btn-close" id="btn-summary-close" aria-label="Close summary">x</button>
+        </div>
+        <div class="summary-modal-content" id="summary-modal-content"></div>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

@@ -8,15 +8,44 @@ const ALLOWED_STATUSES = new Set(['WFO', 'WFH', 'Leave', 'Holiday']);
 const PG_UNIQUE_VIOLATION = '23505';
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'calendar.json');
-const connectionString = process.env.SUPABASE_DB_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL;
+const rawConnectionString = process.env.SUPABASE_DB_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL;
+const disableSslEnv = process.env.PGSSLMODE === 'disable' || process.env.PGSSL === 'false';
+
+function getSslMode(connectionString) {
+  if (!connectionString) return '';
+  try {
+    const url = new URL(connectionString);
+    return (url.searchParams.get('sslmode') || '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function normalizeConnectionString(connectionString) {
+  if (!connectionString) return connectionString;
+  try {
+    const url = new URL(connectionString);
+    // node-postgres can let URL SSL params override config.ssl; strip them so our ssl config is authoritative.
+    url.searchParams.delete('sslmode');
+    url.searchParams.delete('ssl');
+    return url.toString();
+  } catch {
+    return connectionString;
+  }
+}
+
+const connectionString = normalizeConnectionString(rawConnectionString);
+const sslMode = getSslMode(rawConnectionString);
 const hasDatabase = Boolean(connectionString);
-const disableSsl = process.env.PGSSLMODE === 'disable' || process.env.PGSSL === 'false';
+
+const strictSslVerification = sslMode === 'verify-ca' || sslMode === 'verify-full';
+const disableSsl = disableSslEnv || sslMode === 'disable';
 
 let pool;
 if (hasDatabase) {
   pool = new Pool({
     connectionString,
-    ssl: disableSsl ? false : { rejectUnauthorized: false }
+    ssl: disableSsl ? false : { rejectUnauthorized: strictSslVerification }
   });
 }
 

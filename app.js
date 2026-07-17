@@ -1,14 +1,24 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
-const { sql, db } = require('@vercel/postgres');
+const { Pool } = require('pg');
 
 const app = express();
 const ALLOWED_STATUSES = new Set(['WFO', 'WFH', 'Leave', 'Holiday']);
 const PG_UNIQUE_VIOLATION = '23505';
 const DATA_DIR = path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'calendar.json');
-const hasDatabase = Boolean(process.env.POSTGRES_URL || process.env.DATABASE_URL);
+const connectionString = process.env.SUPABASE_DB_URL || process.env.POSTGRES_URL || process.env.DATABASE_URL;
+const hasDatabase = Boolean(connectionString);
+const disableSsl = process.env.PGSSLMODE === 'disable' || process.env.PGSSL === 'false';
+
+let pool;
+if (hasDatabase) {
+  pool = new Pool({
+    connectionString,
+    ssl: disableSsl ? false : { rejectUnauthorized: false }
+  });
+}
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -22,18 +32,18 @@ function ensureDbReady() {
   if (!hasDatabase) return Promise.resolve();
   if (!dbInitPromise) {
     dbInitPromise = (async () => {
-      await sql`CREATE TABLE IF NOT EXISTS members (
+      await pool.query(`CREATE TABLE IF NOT EXISTS members (
         id SERIAL PRIMARY KEY,
         name TEXT NOT NULL UNIQUE
-      )`;
-      await sql`CREATE TABLE IF NOT EXISTS entries (
+      )`);
+      await pool.query(`CREATE TABLE IF NOT EXISTS entries (
         id SERIAL PRIMARY KEY,
         month TEXT NOT NULL,
         member TEXT NOT NULL,
         day INTEGER NOT NULL,
         status TEXT NOT NULL,
         UNIQUE(month, member, day)
-      )`;
+      )`);
     })();
   }
   return dbInitPromise;
@@ -56,8 +66,8 @@ async function readData() {
 
   await ensureDbReady();
   const [membersResult, entriesResult] = await Promise.all([
-    sql`SELECT name FROM members ORDER BY id ASC`,
-    sql`SELECT month, member, day, status FROM entries ORDER BY month, member, day`
+    pool.query('SELECT name FROM members ORDER BY id ASC'),
+    pool.query('SELECT month, member, day, status FROM entries ORDER BY month, member, day')
   ]);
 
   const members = membersResult.rows.map((row) => row.name);
@@ -103,10 +113,10 @@ async function saveEntries(entries) {
   }
 
   await ensureDbReady();
-  const client = await db.connect();
+  const client = await pool.connect();
   try {
-    await client.sql`BEGIN`;
-    await client.sql`DELETE FROM entries`;
+    await client.query('BEGIN');
+    await client.query('DELETE FROM entries');
 
     const rows = [];
     for (const [month, monthEntries] of Object.entries(entries)) {
@@ -131,9 +141,9 @@ async function saveEntries(entries) {
       );
     }
 
-    await client.sql`COMMIT`;
+    await client.query('COMMIT');
   } catch (error) {
-    await client.sql`ROLLBACK`;
+    await client.query('ROLLBACK');
     throw error;
   } finally {
     client.release();
@@ -157,7 +167,7 @@ async function addMember(name) {
 
   await ensureDbReady();
   try {
-    await sql`INSERT INTO members (name) VALUES (${trimmed})`;
+    await pool.query('INSERT INTO members (name) VALUES ($1)', [trimmed]);
   } catch (error) {
     if (error.code === PG_UNIQUE_VIOLATION) {
       const err = new Error('Member already exists');
@@ -167,7 +177,7 @@ async function addMember(name) {
     throw error;
   }
 
-  const result = await sql`SELECT name FROM members ORDER BY id ASC`;
+  const result = await pool.query('SELECT name FROM members ORDER BY id ASC');
   return result.rows.map((row) => row.name);
 }
 
@@ -190,27 +200,27 @@ async function removeMember(name) {
   }
 
   await ensureDbReady();
-  const existing = await sql`SELECT id FROM members WHERE name = ${name}`;
+  const existing = await pool.query('SELECT id FROM members WHERE name = $1', [name]);
   if (existing.rowCount === 0) {
     const err = new Error('Member not found');
     err.status = 404;
     throw err;
   }
 
-  const client = await db.connect();
+  const client = await pool.connect();
   try {
-    await client.sql`BEGIN`;
-    await client.sql`DELETE FROM entries WHERE member = ${name}`;
-    await client.sql`DELETE FROM members WHERE name = ${name}`;
-    await client.sql`COMMIT`;
+    await client.query('BEGIN');
+    await client.query('DELETE FROM entries WHERE member = $1', [name]);
+    await client.query('DELETE FROM members WHERE name = $1', [name]);
+    await client.query('COMMIT');
   } catch (error) {
-    await client.sql`ROLLBACK`;
+    await client.query('ROLLBACK');
     throw error;
   } finally {
     client.release();
   }
 
-  const result = await sql`SELECT name FROM members ORDER BY id ASC`;
+  const result = await pool.query('SELECT name FROM members ORDER BY id ASC');
   return result.rows.map((row) => row.name);
 }
 

@@ -24,7 +24,7 @@ A lightweight, self-hosted web app to track your team's Work-From-Home (WFH), pl
 |----------|-------------------------------------|
 | Frontend | HTML + CSS + Vanilla JS             |
 | Backend  | Node.js + Express                   |
-| Storage  | Postgres (Vercel) with local JSON fallback |
+| Storage  | Supabase Postgres (via `pg`) with local JSON fallback |
 
 ---
 
@@ -43,7 +43,7 @@ npm start
 
 Visit **http://localhost:3000**
 
-> Optional: set `POSTGRES_URL` to run locally with Postgres instead of JSON file storage.
+> Optional: set `SUPABASE_DB_URL` (or `POSTGRES_URL`/`DATABASE_URL`) to run locally with Postgres instead of JSON file storage.
 
 ---
 
@@ -66,13 +66,17 @@ https://<your-username>.github.io/calendar/
 
 ---
 
-### Option C — Vercel (frontend + API + persistent DB)
+### Option C — Vercel + Supabase (frontend + API + persistent DB)
 
 1. Import this repo in Vercel.
-2. Add a managed Postgres database (or connect an external Postgres DB).
-3. Set `POSTGRES_URL` in **Project Settings → Environment Variables**.
-4. Keep `main` as the production branch.
-5. Deploy.
+2. Create a Supabase project and copy the Postgres connection string.
+3. In Vercel, set one of these environment variables in **Project Settings → Environment Variables**:
+  - `SUPABASE_DB_URL` (preferred)
+  - `POSTGRES_URL`
+  - `DATABASE_URL`
+4. Use the Supabase transaction pooler connection string and keep SSL enabled.
+5. Keep `main` as the production branch.
+6. Deploy.
 
 The app uses serverless API routes on Vercel and keeps the same frontend/API contract.
 
@@ -139,7 +143,7 @@ The app uses serverless API routes on Vercel and keeps the same frontend/API con
 
 ## Database Schema (auto-created)
 
-When `POSTGRES_URL` is configured, the app creates these tables automatically:
+When `SUPABASE_DB_URL` (or `POSTGRES_URL` / `DATABASE_URL`) is configured, the app creates these tables automatically:
 
 ```sql
 CREATE TABLE members (
